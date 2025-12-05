@@ -128,8 +128,21 @@ def initialize_retriever():
         separator="\n"
     )
 
-    # チャンク分割を実施
-    splitted_docs = text_splitter.split_documents(docs_all)
+    # CSVファイルとそれ以外を分離
+    csv_docs = []
+    other_docs = []
+    for doc in docs_all:
+        # CSVファイルかどうかをメタデータで判定（文字列として保存されているため）
+        if doc.metadata.get("is_csv") == "true":
+            csv_docs.append(doc)
+        else:
+            other_docs.append(doc)
+    
+    # CSVファイル以外をチャンク分割
+    splitted_other_docs = text_splitter.split_documents(other_docs)
+    
+    # CSVファイルは分割せず、そのまま追加（全情報を保持）
+    splitted_docs = splitted_other_docs + csv_docs
 
     # ベクターストアの作成
     db = Chroma.from_documents(splitted_docs, embedding=embeddings)
@@ -217,7 +230,25 @@ def file_load(path, docs_all):
         # ファイルの拡張子に合ったdata loaderを使ってデータ読み込み
         loader = ct.SUPPORTED_EXTENSIONS[file_extension](path)
         docs = loader.load()
-        docs_all.extend(docs)
+        
+        # CSVファイルの場合、複数のドキュメントを1つに統合
+        if file_extension == ".csv":
+            if docs:
+                # 最初のドキュメントをベースにする
+                merged_doc = docs[0]
+                # 全ドキュメントのpage_contentを改行で結合
+                merged_content = "\n".join([doc.page_content for doc in docs])
+                # 統合したコンテンツを設定
+                merged_doc.page_content = merged_content
+                # CSVファイルであることを示すメタデータを追加（チャンク分割をスキップするため）
+                # Chromaはbool型をサポートしていないため、文字列として保存
+                merged_doc.metadata["is_csv"] = "true"
+                # 統合したドキュメントを1つだけ追加
+                docs_all.append(merged_doc)
+            else:
+                docs_all.extend(docs)
+        else:
+            docs_all.extend(docs)
 
 
 def adjust_string(s):
